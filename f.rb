@@ -1,4 +1,4 @@
-Create Duckyscrip write the code in ruby require 'prawn'
+require 'prawn'
 
 # Vytvoření nového PDF souboru
 Prawn::Document.generate("download_with_js.pdf") do |pdf|
