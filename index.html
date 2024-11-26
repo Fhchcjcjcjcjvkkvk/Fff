@@ -1,22 +1,25 @@
 <!DOCTYPE html>
-<html lang="cs">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Databáze</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            margin-top: 20%;
-            background-color: #f0f0f0;
-        }
-        h1 {
-            color: #4CAF50;
-        }
-    </style>
+    <title>XSS Test Page</title>
 </head>
 <body>
-    <h1>DOSTALI JSTE SE DO DATABÁZE</h1>
+    <h1>Welcome to the XSS Test Page</h1>
+
+    <form method="GET">
+        <label for="name">Enter your name: </label>
+        <input type="text" id="name" name="name" placeholder="Your name">
+        <input type="submit" value="Submit">
+    </form>
+
+    <h2>Hello, 
+    <?php
+        if (isset($_GET['name'])) {
+            echo $_GET['name']; // No sanitization: This is where XSS can be injected
+        }
+    ?>
+    </h2>
 </body>
 </html>
