@@ -31,7 +31,7 @@ def encrypt_pdf(pdf_filename, password):
 def send_password_email(password):
     # Set up the email server and credentials
     sender_email = "info@infopeklo.cz"
-    receiver_email = "alfikeita@gmail.com"
+    receiver_email = "info@infopeklo.cz"
     smtp_server = "smtp.seznam.cz"  # Use your SMTP server address
     smtp_port = 587  # Typical port for TLS
     sender_password = "Polik789"  # Replace with the actual email password
