@@ -1,116 +1,124 @@
+import sys
 import os
-import tkinter as tk
-from tkinter import ttk, messagebox
-import pyshark
-import threading
+import subprocess
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox, QTableWidget, QTableWidgetItem
+)
+from PyQt5.QtCore import Qt
+import scapy.all as scapy
+from threading import Thread
 
-# Global variables
-capture_thread = None
-capture_running = False
-capture_file = "Capture.pcap"
-capture_data = []
-adapters = []
+class NetworkAnalyzer(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Network Analyzer")
+        self.setGeometry(200, 200, 800, 400)
 
-# Function to get network adapters (example: using pyshark)
-def get_network_adapters():
-    global adapters
-    try:
-        adapters = pyshark.LiveCapture.get_interfaces()
-        return adapters
-    except Exception as e:
-        messagebox.showerror("Error", f"Unable to fetch network adapters: {str(e)}")
-        return []
+        self.capture_thread = None
+        self.capturing = False
+        self.capture_file = "Capture.pcap"
 
-# Function to start capture
-def start_capture(adapter, table):
-    global capture_running, capture_data
-    capture_running = True
-    capture_data = []
+        self.init_ui()
 
-    def capture():
-        global capture_file
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        # Adapter Selection
+        self.adapter_label = QLabel("Select Network Adapter:")
+        self.adapter_dropdown = QComboBox()
+        self.refresh_adapters()
+
+        adapter_layout = QHBoxLayout()
+        adapter_layout.addWidget(self.adapter_label)
+        adapter_layout.addWidget(self.adapter_dropdown)
+
+        # Control Buttons
+        self.start_button = QPushButton("START CAPTURE")
+        self.start_button.clicked.connect(self.start_capture)
+
+        self.stop_button = QPushButton("STOP CAPTURE")
+        self.stop_button.clicked.connect(self.stop_capture)
+        self.stop_button.setEnabled(False)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.stop_button)
+
+        # Table for network display
+        self.network_table = QTableWidget()
+        self.network_table.setColumnCount(5)
+        self.network_table.setHorizontalHeaderLabels(["BSSID", "ESSID", "PWR", "ENCR", "NOTE"])
+
+        layout.addLayout(adapter_layout)
+        layout.addLayout(button_layout)
+        layout.addWidget(self.network_table)
+
+        self.setLayout(layout)
+
+    def refresh_adapters(self):
+        # Find available network adapters
         try:
-            capture = pyshark.LiveCapture(interface=adapter, output_file=capture_file)
-            for packet in capture.sniff_continuously():
-                if not capture_running:
-                    break
-                # Process packet information here (simplified for display)
-                try:
-                    if hasattr(packet, 'wlan'):
-                        bssid = packet.wlan.ta if hasattr(packet.wlan, 'ta') else "Unknown"
-                        essid = packet.wlan.ssid if hasattr(packet.wlan, 'ssid') else "Hidden"
-                        pwr = "-"  # Power not directly accessible via pyshark
-                        encr = "-"  # Encryption detection logic needs implementation
-                        cipher = "-"  # Cipher detection logic needs implementation
-                        note = "EAPOL" if 'eapol' in packet else ""
-
-                        if note == "EAPOL":
-                            note = "HANDSHAKE!"
-
-                        capture_data.append((bssid, essid, pwr, encr, cipher, note))
-
-                        # Update GUI table
-                        table.insert("", "end", values=(bssid, essid, pwr, encr, cipher, note))
-                except Exception as e:
-                    continue
+            adapters = subprocess.check_output("netsh wlan show interfaces", shell=True).decode()
+            adapter_names = [line.split(": ")[1].strip() for line in adapters.splitlines() if "Name" in line]
+            self.adapter_dropdown.clear()
+            self.adapter_dropdown.addItems(adapter_names)
         except Exception as e:
-            messagebox.showerror("Error", f"Capture failed: {str(e)}")
+            self.adapter_dropdown.clear()
+            self.adapter_dropdown.addItem("No Adapters Found")
 
-    threading.Thread(target=capture, daemon=True).start()
+    def start_capture(self):
+        selected_adapter = self.adapter_dropdown.currentText()
+        if "No Adapters Found" in selected_adapter or not selected_adapter:
+            self.log("No valid network adapter selected.")
+            return
 
-# Function to stop capture
-def stop_capture():
-    global capture_running
-    capture_running = False
-    messagebox.showinfo("Capture Stopped", f"Capture saved to {capture_file}")
+        self.capturing = True
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.network_table.setRowCount(0)
 
-# Main GUI application
-def main():
-    global adapters
+        self.capture_thread = Thread(target=self.capture_packets, args=(selected_adapter,))
+        self.capture_thread.start()
 
-    root = tk.Tk()
-    root.title("Network Analyzer")
+    def stop_capture(self):
+        self.capturing = False
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
 
-    # Select network adapter
-    tk.Label(root, text="Select Network Adapter:").pack(pady=5)
-    adapter_combo = ttk.Combobox(root, state="readonly")
-    adapter_combo.pack(pady=5)
+    def capture_packets(self, adapter):
+        def packet_handler(packet):
+            if packet.haslayer(scapy.Dot11):
+                bssid = packet.addr2
+                essid = packet.info.decode() if hasattr(packet, 'info') else ""
+                pwr = packet.dBm_AntSignal if hasattr(packet, 'dBm_AntSignal') else "-"
+                encr = "-"
+                note = ""
 
-    adapters = get_network_adapters()
-    if adapters:
-        adapter_combo['values'] = adapters
-        adapter_combo.current(0)
-    else:
-        adapter_combo['values'] = ["No adapters found"]
-        adapter_combo.current(0)
+                if packet.type == 2 and packet.subtype == 8:  # Beacon frame
+                    encr = "WEP/WPA/WPA2" if hasattr(packet, 'auth') else "OPEN"
 
-    # Start and stop buttons
-    button_frame = tk.Frame(root)
-    button_frame.pack(pady=10)
+                if packet.haslayer(scapy.EAPOL):
+                    note = "HANDSHAKE!"
 
-    start_button = tk.Button(button_frame, text="START CAPTURE", command=lambda: start_capture(adapter_combo.get(), table))
-    start_button.grid(row=0, column=0, padx=5)
+                self.update_table(bssid, essid, pwr, encr, note)
 
-    stop_button = tk.Button(button_frame, text="STOP CAPTURE", command=stop_capture)
-    stop_button.grid(row=0, column=1, padx=5)
+        scapy.sniff(iface=adapter, prn=packet_handler, stop_filter=lambda x: not self.capturing)
+        scapy.wrpcap(self.capture_file, scapy.sniff(iface=adapter))
 
-    # Table for displaying capture data
-    columns = ("BSSID", "ESSID", "PWR", "ENCR", "CIPHER", "NOTE")
-    table = ttk.Treeview(root, columns=columns, show="headings")
-    for col in columns:
-        table.heading(col, text=col)
-    table.pack(pady=10, fill=tk.BOTH, expand=True)
+    def update_table(self, bssid, essid, pwr, encr, note):
+        row_count = self.network_table.rowCount()
+        self.network_table.insertRow(row_count)
+        self.network_table.setItem(row_count, 0, QTableWidgetItem(bssid))
+        self.network_table.setItem(row_count, 1, QTableWidgetItem(essid))
+        self.network_table.setItem(row_count, 2, QTableWidgetItem(str(pwr)))
+        self.network_table.setItem(row_count, 3, QTableWidgetItem(encr))
+        self.network_table.setItem(row_count, 4, QTableWidgetItem(note))
 
-    # Set column widths
-    table.column("BSSID", width=150)
-    table.column("ESSID", width=150)
-    table.column("PWR", width=50)
-    table.column("ENCR", width=100)
-    table.column("CIPHER", width=100)
-    table.column("NOTE", width=100)
-
-    # Start the GUI loop
-    root.mainloop()
+    def log(self, message):
+        print(message)
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    analyzer = NetworkAnalyzer()
+    analyzer.show()
+    sys.exit(app.exec_())
