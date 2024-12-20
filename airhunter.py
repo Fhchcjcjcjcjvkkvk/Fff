@@ -1,70 +1,59 @@
-import time
-import subprocess
-import pywifi
-from pywifi import const
-from prettytable import PrettyTable
+#!/usr/bin/env python
 
-def fetch_cipher_details(bssid):
-    """Fetch the encryption and cipher details using netsh command."""
-    try:
-        output = subprocess.check_output(f'netsh wlan show networks mode=bssid', shell=True, text=True)
-        networks = output.split("SSID ")
-        for network in networks:
-            if bssid in network:
-                if "Encryption" in network:
-                    encryption = next((line.split(": ")[1] for line in network.splitlines() if "Encryption" in line), "Unknown")
-                else:
-                    encryption = "Unknown"
-                if "Cipher" in network:
-                    cipher = next((line.split(": ")[1] for line in network.splitlines() if "Cipher" in line), "Unknown")
-                else:
-                    cipher = "Unknown"
-                return encryption, cipher
-    except subprocess.CalledProcessError as e:
-        print(f"Error fetching cipher details: {e}")
-        return "Unknown", "Unknown"
+import sys
+import os
+from scapy.all import *
+import threading
 
-def scan_networks(iface_name):
-    """Scan networks using pywifi on a specific interface."""
-    wifi = pywifi.PyWiFi()
-    iface = next((i for i in wifi.interfaces() if i.name() == iface_name), None)
-    if iface is None:
-        print(f"Interface {iface_name} not found.")
-        return []
+# Global variables
+bssid_to_monitor = None
+interface_to_use = None
+output_file = None
 
-    iface.scan()
-    time.sleep(3)  # Allow time for scan to complete
-    return iface.scan_results()
+def capture_eapol(packet):
+    # Check if the packet is a EAPOL frame (Ethernet frame with EAPOL protocol)
+    if packet.haslayer(EAPOL):
+        # Check if the frame's BSSID matches the target BSSID
+        if packet.addr3 == bssid_to_monitor:
+            print("[ HANDSHAKE ] Captured")
+            os.kill(os.getpid(), 9)  # Close the script after capturing the handshake
+            return  # Stop capturing after the handshake
 
-def display_networks(iface_name):
-    """Display networks in a table format."""
-    table = PrettyTable()
-    table.field_names = ["BSSID", "ESSID", "PWR", "ENCR", "CIPHER"]
+def start_monitoring():
+    # Start sniffing on the specified interface
+    print(f"[*] Monitoring {bssid_to_monitor} on interface {interface_to_use}...")
+    
+    # Write packets to a .pcap file if specified
+    if output_file:
+        print(f"[*] Saving captured packets to {output_file}")
+        sniff(iface=interface_to_use, prn=capture_eapol, store=0, timeout=60, wrpcap=output_file)
+    else:
+        sniff(iface=interface_to_use, prn=capture_eapol, store=0, timeout=60)
 
-    networks = scan_networks(iface_name)
-    for network in networks:
-        bssid = network.bssid
-        essid = network.ssid
-        pwr = network.signal
+def main():
+    global bssid_to_monitor, interface_to_use, output_file
 
-        # Fetch encryption and cipher details
-        encryption, cipher = fetch_cipher_details(bssid)
+    # Ensure the script is being run with the correct arguments
+    if len(sys.argv) != 5:
+        print("Usage: airhunter.py -b <bssid> <interface> --write <file.pcap>")
+        sys.exit(1)
 
-        table.add_row([bssid, essid, pwr, encryption, cipher])
-
-    print(table)
-
-def live_update(iface_name):
-    """Continuously scan and display networks on a specific interface."""
-    try:
-        while True:
-            print(f"\nScanning for networks on interface {iface_name}...\n")
-            display_networks(iface_name)
-            time.sleep(5)  # Update every 5 seconds
-    except KeyboardInterrupt:
-        print("\nExiting program.")
+    # Parse command-line arguments
+    for i in range(1, len(sys.argv), 2):
+        if sys.argv[i] == "-b":
+            bssid_to_monitor = sys.argv[i + 1]
+        elif sys.argv[i] == "--write":
+            output_file = sys.argv[i + 1]
+        elif i == 3:  # Interface argument (directly after bssid)
+            interface_to_use = sys.argv[i]
+    
+    if not bssid_to_monitor or not interface_to_use:
+        print("Error: Both BSSID and Interface are required!")
+        sys.exit(1)
+    
+    # Start the monitoring process
+    thread = threading.Thread(target=start_monitoring)
+    thread.start()
 
 if __name__ == "__main__":
-    iface_name = input("Enter the interface name (e.g., Wi-Fi): ")
-    live_update(iface_name)
-
+    main()
