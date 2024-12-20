@@ -9,11 +9,11 @@ import string
 def caesar_cipher_encrypt(text, shift):
     result = []
     for char in text:
-        if char.isalpha():
+        if char.isalpha():  # Only shift alphabetic characters
             shifted = chr(((ord(char.lower()) - ord('a') + shift) % 26) + ord('a'))
             result.append(shifted.upper() if char.isupper() else shifted)
         else:
-            result.append(char)
+            result.append(char)  # Non-alphabetic characters are not changed
     return ''.join(result)
 
 # Function for XOR Encryption
