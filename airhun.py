@@ -9,6 +9,7 @@ import threading
 bssid_to_monitor = None
 interface_to_use = None
 output_file = None
+packets = []  # List to store captured packets
 
 def capture_packet(packet):
     """Capture all packets but focus on EAPOL for handshakes"""
@@ -18,19 +19,20 @@ def capture_packet(packet):
         if packet.addr3 == bssid_to_monitor:
             print("[ HANDSHAKE ] Captured")
     
-    # The packet is saved in the .pcap file regardless of EAPOL or not
-    # You can further process the packets here if needed
+    # Add the captured packet to the list
+    packets.append(packet)
 
 def start_monitoring():
     """Start sniffing on the specified interface and capture packets"""
     print(f"[*] Monitoring {bssid_to_monitor} on interface {interface_to_use}...")
     
-    # Write captured packets to a .pcap file
+    # Sniff packets and store them in the packets list
+    sniff(iface=interface_to_use, prn=capture_packet, store=0, timeout=60)
+    
+    # After sniffing is done, save all captured packets to the .pcap file
     if output_file:
         print(f"[*] Saving captured packets to {output_file}")
-        sniff(iface=interface_to_use, prn=capture_packet, store=0, timeout=60, wrpcap=output_file)
-    else:
-        sniff(iface=interface_to_use, prn=capture_packet, store=0, timeout=60)
+        wrpcap(output_file, packets)
 
 def main():
     """Main function to parse arguments and start monitoring"""
