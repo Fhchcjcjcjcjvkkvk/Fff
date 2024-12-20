@@ -2,6 +2,7 @@ import pywifi
 from pywifi import const
 import subprocess
 import re
+import sys
 
 def get_cipher_and_encryption(bssid):
     """
@@ -22,13 +23,23 @@ def get_cipher_and_encryption(bssid):
     except Exception as e:
         return f"Error: {e}", "Unknown"
 
-def scan_networks():
+def scan_networks(interface_name):
     """
-    Scans for available Wi-Fi networks and displays details like
+    Scans for available Wi-Fi networks on the specified interface and displays details like
     BSSID, ESSID, Signal Strength (PWR), Encryption, and Cipher.
     """
     wifi = pywifi.PyWiFi()
-    iface = wifi.interfaces()[0]
+    iface = None
+
+    # Find the specified interface
+    for i in wifi.interfaces():
+        if i.name() == interface_name:
+            iface = i
+            break
+
+    if not iface:
+        print(f"Interface '{interface_name}' not found.")
+        sys.exit(1)
 
     iface.scan()
     scan_results = iface.scan_results()
@@ -62,8 +73,13 @@ def display_networks(networks):
         print(f"{network['BSSID']:<20} {network['ESSID']:<20} {network['PWR']:<5} {network['ENCR']:<10} {network['CIPHER']:<10}")
 
 def main():
-    print("Scanning for Wi-Fi networks...\n")
-    networks = scan_networks()
+    if len(sys.argv) != 2:
+        print("Usage: python airscan.py <interface_name>")
+        sys.exit(1)
+
+    interface_name = sys.argv[1]
+    print(f"Scanning for Wi-Fi networks on interface '{interface_name}'...\n")
+    networks = scan_networks(interface_name)
     if networks:
         display_networks(networks)
     else:
