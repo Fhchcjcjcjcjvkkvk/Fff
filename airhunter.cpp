@@ -5,12 +5,14 @@
 #include <windows.h>
 #include <ctime>
 #include <regex>
+#include <stdexcept>
 
 using namespace std;
 
-// Function to execute the netsh command and get the output
-string executeCommand(const string &command) {
+// Function to execute the netsh command and get the output for a specific interface
+string executeCommand(const string &interfaceName) {
     string result;
+    string command = "netsh wlan show networks mode=bssid interface=\"" + interfaceName + "\"";  // Specify interface name
     char buffer[128];
     FILE* pipe = _popen(command.c_str(), "r");
     if (!pipe) throw runtime_error("popen() failed!");
@@ -101,12 +103,25 @@ void displayNetworkInfo(const vector<vector<string>>& networks, int elapsedTime)
 }
 
 // Main function
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        cerr << "Usage: airhunter.exe INTERFACE_NAME" << endl;
+        return 1;
+    }
+
+    string interfaceName = argv[1];  // Get the interface name from the command line argument
+
     try {
-        // Get available networks using netsh
-        string command = "netsh wlan show networks mode=bssid";
         while (true) {
-            string netshOutput = executeCommand(command);
+            // Get available networks using netsh for the specified interface
+            string netshOutput = executeCommand(interfaceName);
+
+            // If no networks found, print a message
+            if (netshOutput.find("There are no hosted networks") != string::npos || 
+                netshOutput.find("No wireless networks were found") != string::npos) {
+                cout << "No networks found." << endl;
+                return 0;
+            }
 
             // Parse the netsh output to extract network information
             vector<vector<string>> networks = parseNetworks(netshOutput);
@@ -121,5 +136,6 @@ int main() {
     } catch (const exception &e) {
         cerr << "Error: " << e.what() << endl;
     }
+
     return 0;
 }
