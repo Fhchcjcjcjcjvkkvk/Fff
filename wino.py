@@ -22,8 +22,9 @@ def xor_encrypt(text, key):
 
 # Function for AES-128 Encryption
 def aes_encrypt(text, key):
-    key = key.encode('utf-8')[:16]  # Ensure the key is 16 bytes
-    cipher = AES.new(key, AES.MODE_CBC)
+    # Ensure the key is 16 bytes long (AES-128)
+    key = (key * ((16 // len(key)) + 1))[:16]  # Repeat key and trim to 16 bytes
+    cipher = AES.new(key.encode('utf-8'), AES.MODE_CBC)
     ct_bytes = cipher.encrypt(pad(text.encode('utf-8'), AES.block_size))
     return cipher.iv + ct_bytes  # prepend the IV for later decryption
 
