@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import sys
+import argparse
 import os
 from scapy.all import *
 import threading
@@ -10,48 +10,46 @@ bssid_to_monitor = None
 interface_to_use = None
 output_file = None
 
-def capture_eapol(packet):
-    # Check if the packet is a EAPOL frame (Ethernet frame with EAPOL protocol)
+def capture_packet(packet):
+    """Capture all packets but focus on EAPOL for handshakes"""
+    # Check if the packet is an EAPOL frame (used in WPA/WPA2 handshakes)
     if packet.haslayer(EAPOL):
-        # Check if the frame's BSSID matches the target BSSID
+        # If the packet's BSSID matches the target BSSID, log a handshake capture
         if packet.addr3 == bssid_to_monitor:
             print("[ HANDSHAKE ] Captured")
-            os.kill(os.getpid(), 9)  # Close the script after capturing the handshake
-            return  # Stop capturing after the handshake
+    
+    # The packet is saved in the .pcap file regardless of EAPOL or not
+    # You can further process the packets here if needed
 
 def start_monitoring():
-    # Start sniffing on the specified interface
+    """Start sniffing on the specified interface and capture packets"""
     print(f"[*] Monitoring {bssid_to_monitor} on interface {interface_to_use}...")
     
-    # Write packets to a .pcap file if specified
+    # Write captured packets to a .pcap file
     if output_file:
         print(f"[*] Saving captured packets to {output_file}")
-        sniff(iface=interface_to_use, prn=capture_eapol, store=0, timeout=60, wrpcap=output_file)
+        sniff(iface=interface_to_use, prn=capture_packet, store=0, timeout=60, wrpcap=output_file)
     else:
-        sniff(iface=interface_to_use, prn=capture_eapol, store=0, timeout=60)
+        sniff(iface=interface_to_use, prn=capture_packet, store=0, timeout=60)
 
 def main():
+    """Main function to parse arguments and start monitoring"""
     global bssid_to_monitor, interface_to_use, output_file
 
-    # Ensure the script is being run with the correct arguments
-    if len(sys.argv) != 5:
-        print("Usage: airhunter.py -b <bssid> <interface> --write <file.pcap>")
-        sys.exit(1)
+    # Argument parsing using argparse
+    parser = argparse.ArgumentParser(description="Wi-Fi network monitor for capturing EAPOL handshakes and all network traffic.")
+    parser.add_argument("-b", "--bssid", required=True, help="Target BSSID to monitor (MAC address of the AP)")
+    parser.add_argument("interface", help="Network interface to use for sniffing")
+    parser.add_argument("--write", dest="output_file", help="File to save captured packets in pcap format")
+    
+    args = parser.parse_args()
 
-    # Parse command-line arguments
-    for i in range(1, len(sys.argv), 2):
-        if sys.argv[i] == "-b":
-            bssid_to_monitor = sys.argv[i + 1]
-        elif sys.argv[i] == "--write":
-            output_file = sys.argv[i + 1]
-        elif i == 3:  # Interface argument (directly after bssid)
-            interface_to_use = sys.argv[i]
-    
-    if not bssid_to_monitor or not interface_to_use:
-        print("Error: Both BSSID and Interface are required!")
-        sys.exit(1)
-    
-    # Start the monitoring process
+    # Assign parsed arguments to global variables
+    bssid_to_monitor = args.bssid
+    interface_to_use = args.interface
+    output_file = args.output_file
+
+    # Start the monitoring process in a separate thread
     thread = threading.Thread(target=start_monitoring)
     thread.start()
 
