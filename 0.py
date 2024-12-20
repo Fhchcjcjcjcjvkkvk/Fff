@@ -4,6 +4,7 @@ import argparse
 import os
 from scapy.all import *
 import threading
+import signal
 
 # Global variables
 bssid_to_monitor = None
@@ -26,13 +27,17 @@ def start_monitoring():
     """Start sniffing on the specified interface and capture packets"""
     print(f"[*] Monitoring {bssid_to_monitor} on interface {interface_to_use}...")
     
-    # Sniff packets and store them in the packets list
-    sniff(iface=interface_to_use, prn=capture_packet, store=0, timeout=60)
-    
-    # After sniffing is done, save all captured packets to the .pcap file
-    if output_file:
-        print(f"[*] Saving captured packets to {output_file}")
-        wrpcap(output_file, packets)
+    try:
+        # Sniff packets and store them in the packets list
+        sniff(iface=interface_to_use, prn=capture_packet, store=0)
+    except KeyboardInterrupt:
+        # Handle keyboard interrupt gracefully (Ctrl+C)
+        print("\n[*] Keyboard interrupt detected. Saving captured packets...")
+    finally:
+        # After sniffing is done or interrupted, save all captured packets to the .pcap file
+        if output_file:
+            print(f"[*] Saving captured packets to {output_file}")
+            wrpcap(output_file, packets)
 
 def main():
     """Main function to parse arguments and start monitoring"""
@@ -54,6 +59,9 @@ def main():
     # Start the monitoring process in a separate thread
     thread = threading.Thread(target=start_monitoring)
     thread.start()
+
+    # Wait for the thread to finish
+    thread.join()
 
 if __name__ == "__main__":
     main()
