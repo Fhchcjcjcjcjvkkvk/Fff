@@ -4,7 +4,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import padding
 
 # Constants
-AES_KEY = b'magicspellmagic'  # 16 bytes for AES-128
+AES_KEY = b'magicspellmagicx'  # 16 bytes for AES-128
 AES_IV = b'iv12345678901234'  # 16 bytes IV for AES
 
 # Caesar cipher shift value
